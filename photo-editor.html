@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Photo Preview Overlay Editor</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --text:#f3f4f6; --muted:#a7adb8; --accent:#ff3b30; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap { max-width:1180px; margin:0 auto; padding:24px; }
+  h1 { margin:0 0 8px; font-size:26px; }
+  .sub { margin:0 0 20px; color:var(--muted); }
+  .grid { display:grid; grid-template-columns:320px 1fr; gap:20px; align-items:start; }
+  .panel { background:var(--panel); border:1px solid #262b35; border-radius:16px; padding:16px; }
+  label { display:block; font-size:13px; color:#cdd2da; margin:14px 0 6px; }
+  input[type=file], input[type=text], input[type=number], select {
+    width:100%; padding:10px 11px; border-radius:10px; border:1px solid #343a46;
+    background:#0f1217; color:var(--text);
+  }
+  input[type=color] { width:100%; height:40px; padding:2px; border-radius:10px; border:1px solid #343a46; background:#0f1217; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .checks { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .check { display:flex; gap:8px; align-items:center; background:#101319; border:1px solid #2c313b; padding:9px 10px; border-radius:10px; font-size:12px; color:#d7dbe2; }
+  .actions { display:flex; gap:8px; margin-top:16px; }
+  button {
+    border:0; border-radius:10px; padding:11px 13px; cursor:pointer; font-weight:700;
+    background:#f3f4f6; color:#0e1116;
+  }
+  button.secondary { background:#2a2f39; color:#fff; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .stage { display:flex; justify-content:center; align-items:center; min-height:680px; }
+  canvas { max-width:100%; max-height:78vh; width:auto; height:auto; border-radius:14px; background:#0a0b0d; box-shadow:0 20px 60px rgba(0,0,0,.35); }
+  .note { font-size:12px; line-height:1.5; color:var(--muted); margin-top:12px; }
+  .range { width:100%; }
+  .value { color:#fff; font-variant-numeric:tabular-nums; }
+  @media(max-width:850px){ .grid{grid-template-columns:1fr;} .stage{min-height:0;} canvas{max-height:none;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Photo Preview Overlay Editor</h1>
+  <p class="sub">Create a video-style <b>photo preview</b> with a play button, time, progress bar and controls. Everything runs in your browser.</p>
+
+  <div class="grid">
+    <div class="panel">
+      <label>Upload photo</label>
+      <input id="file" type="file" accept="image/*">
+
+      <label>Preview label</label>
+      <input id="label" type="text" value="PHOTO PREVIEW">
+
+      <div class="row">
+        <div>
+          <label>Current time</label>
+          <input id="cur" type="text" value="00:00">
+        </div>
+        <div>
+          <label>Total time</label>
+          <input id="total" type="text" value="01:30">
+        </div>
+      </div>
+
+      <label>Progress <span id="progressVal" class="value">0%</span></label>
+      <input id="progress" class="range" type="range" min="0" max="100" value="0">
+
+      <div class="row">
+        <div>
+          <label>Overlay opacity</label>
+          <input id="opacity" class="range" type="range" min="0" max="100" value="95">
+        </div>
+        <div>
+          <label>Play size</label>
+          <input id="playSize" class="range" type="range" min="6" max="22" value="11">
+        </div>
+      </div>
+
+      <div class="checks">
+        <label class="check"><input id="showRec" type="checkbox" checked> REC</label>
+        <label class="check"><input id="showHd" type="checkbox" checked> HD</label>
+        <label class="check"><input id="showControls" type="checkbox" checked> Controls</label>
+        <label class="check"><input id="showLabel" type="checkbox" checked> Photo label</label>
+      </div>
+
+      <div class="actions">
+        <button id="download" disabled>Export PNG</button>
+        <button id="reset" class="secondary">Reset</button>
+      </div>
+
+      <div class="note">
+        The editor intentionally labels the result as <b>PHOTO PREVIEW</b> so a still image is not presented as a real video.
+      </div>
+    </div>
+
+    <div class="panel stage">
+      <canvas id="canvas" width="1080" height="1350"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const c = $('canvas'), ctx = c.getContext('2d');
+let img = null, objectURL = null;
+
+const controls = ['label','cur','total','progress','opacity','playSize','showRec','showHd','showControls','showLabel'];
+controls.forEach(id => $(id).addEventListener('input', draw));
+
+$('progress').addEventListener('input', () => {
+  $('progressVal').textContent = $('progress').value + '%';
+  draw();
+});
+
+$('file').addEventListener('change', e => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  if (objectURL) URL.revokeObjectURL(objectURL);
+  objectURL = URL.createObjectURL(f);
+  img = new Image();
+  img.onload = () => {
+    const max = 1400;
+    const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    c.width = Math.round(img.naturalWidth * scale);
+    c.height = Math.round(img.naturalHeight * scale);
+    $('download').disabled = false;
+    draw();
+  };
+  img.src = objectURL;
+});
+
+$('reset').addEventListener('click', () => {
+  $('label').value = 'PHOTO PREVIEW';
+  $('cur').value = '00:00';
+  $('total').value = '01:30';
+  $('progress').value = 0;
+  $('progressVal').textContent = '0%';
+  $('opacity').value = 95;
+  $('playSize').value = 11;
+  $('showRec').checked = true;
+  $('showHd').checked = true;
+  $('showControls').checked = true;
+  $('showLabel').checked = true;
+  draw();
+});
+
+$('download').addEventListener('click', () => {
+  const a = document.createElement('a');
+  a.download = 'photo-preview.png';
+  a.href = c.toDataURL('image/png');
+  a.click();
+});
+
+function fitCover(image, cw, ch) {
+  const ir = image.naturalWidth / image.naturalHeight;
+  const cr = cw / ch;
+  let dw, dh, sx, sy;
+  if (ir > cr) {
+    dh = ch; dw = dh * ir; sx = (dw-cw)/2; sy = 0;
+  } else {
+    dw = cw; dh = dw / ir; sx = 0; sy = (dh-ch)/2;
+  }
+  return { dw, dh, sx, sy };
+}
+
+function roundedRect(x,y,w,h,r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+function draw() {
+  if (!img) {
+    ctx.fillStyle = '#0b0d11';
+    ctx.fillRect(0,0,c.width,c.height);
+    ctx.fillStyle = '#858c99';
+    ctx.textAlign = 'center';
+    ctx.font = '600 28px system-ui';
+    ctx.fillText('Upload an image to begin', c.width/2, c.height/2);
+    return;
+  }
+
+  const cw = c.width, ch = c.height;
+  const cover = fitCover(img, cw, ch);
+  const tmp = document.createElement('canvas');
+  tmp.width = cw; tmp.height = ch;
+  const t = tmp.getContext('2d');
+  t.drawImage(img, -cover.sx, -cover.sy, cover.dw, cover.dh);
+  ctx.globalAlpha = 1;
+  ctx.drawImage(tmp, 0, 0);
+
+  const op = Number($('opacity').value)/100;
+  const pad = Math.max(18, Math.round(cw*0.026));
+  const playR = Math.round(cw * Number($('playSize').value)/100);
+
+  // subtle darkened overlay near bottom
+  const grad = ctx.createLinearGradient(0, ch*0.70, 0, ch);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, `rgba(0,0,0,${0.20*op})`);
+  ctx.fillStyle = grad; ctx.fillRect(0,ch*0.62,cw,ch*0.38);
+
+  ctx.strokeStyle = `rgba(255,255,255,${0.95*op})`;
+  ctx.lineWidth = Math.max(3, cw/360);
+
+  // corner brackets
+  const L = Math.round(cw*0.075);
+  const B = Math.round(cw*0.03);
+  [[pad,pad,1,1],[cw-pad,pad,-1,1],[pad,ch-pad,1,-1],[cw-pad,ch-pad,-1,-1]].forEach(([x,y,dx,dy])=>{
+    ctx.beginPath();
+    ctx.moveTo(x+dx*L,y); ctx.lineTo(x,y); ctx.lineTo(x,y+dy*L); ctx.stroke();
+  });
+
+  // REC
+  ctx.font = `700 ${Math.round(cw*0.034)}px system-ui`;
+  ctx.textAlign = 'left'; ctx.textBaseline='middle';
+  if ($('showRec').checked) {
+    ctx.fillStyle = `rgba(255,255,255,${op})`;
+    ctx.fillText('REC', pad+6, pad+L*0.46);
+    ctx.fillStyle = '#ff3b30';
+    ctx.beginPath(); ctx.arc(pad+6+ctx.measureText('REC').width+14, pad+L*0.46, Math.max(5,cw/120),0,Math.PI*2); ctx.fill();
+  }
+
+  // HD
+  if ($('showHd').checked) {
+    const txt='HD';
+    const tw=ctx.measureText(txt).width+pad;
+    const bx=cw-pad-tw/2;
+    ctx.strokeStyle=`rgba(255,255,255,${op})`;
+    ctx.strokeRect(cw-pad-tw, pad+2, tw-pad*0.2, Math.round(cw*0.05));
+    ctx.fillStyle=`rgba(255,255,255,${op})`;
+    ctx.textAlign='center';
+    ctx.fillText(txt, cw-pad-tw/2-pad*0.1, pad+2+Math.round(cw*0.025));
+  }
+
+  // photo preview pill
+  if ($('showLabel').checked) {
+    const txt=$('label').value || 'PHOTO PREVIEW';
+    ctx.font=`700 ${Math.round(cw*0.019)}px system-ui`;
+    const tw=ctx.measureText(txt).width + 24, th=Math.round(cw*0.045);
+    const x=cw-pad-tw, y=pad+Math.round(cw*0.075);
+    ctx.fillStyle='rgba(0,0,0,0.62)';
+    roundedRect(x,y,tw,th,th/2); ctx.fill();
+    ctx.fillStyle=`rgba(255,255,255,${op})`; ctx.textAlign='center';
+    ctx.fillText(txt,x+tw/2,y+th/2+1);
+  }
+
+  // play button
+  ctx.beginPath();
+  ctx.fillStyle='rgba(0,0,0,0.30)';
+  ctx.arc(cw/2,ch/2,playR,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=`rgba(255,255,255,${op})`;
+  ctx.lineWidth=Math.max(3,cw/360);
+  ctx.stroke();
+  ctx.fillStyle=`rgba(255,255,255,${op})`;
+  ctx.beginPath();
+  ctx.moveTo(cw/2-playR*0.22, ch/2-playR*0.42);
+  ctx.lineTo(cw/2-playR*0.22, ch/2+playR*0.42);
+  ctx.lineTo(cw/2+playR*0.50, ch/2);
+  ctx.closePath(); ctx.fill();
+
+  if ($('showControls').checked) {
+    const bottom = ch - Math.round(ch*0.055);
+    ctx.fillStyle=`rgba(255,255,255,${op})`;
+    ctx.font=`600 ${Math.round(cw*0.027)}px system-ui`;
+    ctx.textAlign='left';
+    ctx.fillText(($('cur').value||'00:00')+' / '+($('total').value||'01:30'), pad, bottom-Math.round(cw*0.025));
+
+    // volume icon
+    const vx=cw-pad-95, vy=bottom-Math.round(cw*0.023);
+    ctx.strokeStyle=`rgba(255,255,255,${op})`; ctx.lineWidth=Math.max(3,cw/450);
+    ctx.beginPath(); ctx.moveTo(vx,vy-8); ctx.lineTo(vx+10,vy-8); ctx.lineTo(vx+20,vy-18); ctx.lineTo(vx+20,vy+18); ctx.lineTo(vx+10,vy+8); ctx.lineTo(vx,vy+8); ctx.closePath(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(vx+22,vy,12,-0.8,0.8); ctx.stroke();
+
+    // fullscreen
+    const fx=cw-pad-38, fy=bottom-Math.round(cw*0.023);
+    ctx.beginPath();
+    ctx.moveTo(fx-12,fy-12);ctx.lineTo(fx-3,fy-12);ctx.moveTo(fx-12,fy-12);ctx.lineTo(fx-12,fy-3);
+    ctx.moveTo(fx+12,fy-12);ctx.lineTo(fx+3,fy-12);ctx.moveTo(fx+12,fy-12);ctx.lineTo(fx+12,fy-3);
+    ctx.moveTo(fx-12,fy+12);ctx.lineTo(fx-3,fy+12);ctx.moveTo(fx-12,fy+12);ctx.lineTo(fx-12,fy+3);
+    ctx.moveTo(fx+12,fy+12);ctx.lineTo(fx+3,fy+12);ctx.moveTo(fx+12,fy+12);ctx.lineTo(fx+12,fy+3);
+    ctx.stroke();
+
+    // progress track + red dot
+    const x1=pad, x2=cw-pad, py=bottom+Math.round(cw*0.01);
+    ctx.lineWidth=Math.max(3,cw/500);
+    ctx.strokeStyle=`rgba(255,255,255,${0.75*op})`;
+    ctx.beginPath(); ctx.moveTo(x1,py); ctx.lineTo(x2,py); ctx.stroke();
+    const pct=Number($('progress').value)/100;
+    const px=x1+(x2-x1)*pct;
+    ctx.strokeStyle='#ff3b30';
+    ctx.beginPath(); ctx.moveTo(x1,py); ctx.lineTo(px,py); ctx.stroke();
+    ctx.fillStyle='#ff3b30';
+    ctx.beginPath(); ctx.arc(px,py,Math.max(5,cw/120),0,Math.PI*2); ctx.fill();
+  }
+}
+draw();
+</script>
+</body>
+</html>
