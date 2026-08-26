@@ -1,0 +1,23 @@
+name: Windows Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Windows information
+        shell: pwsh
+        run: |
+          Write-Host "Windows runner started"
+          Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion
+
+      - name: Run commands
+        shell: pwsh
+        run: |
+          Write-Host "Your project is running here..."
